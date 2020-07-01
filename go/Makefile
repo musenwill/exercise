@@ -15,7 +15,7 @@ else
 	os=linux
 endif
 
-build: check
+build: check game24
 	${GO_EXECUTABLE} build ${LDFLAGS} -o ${BINARY}
 
 check:
@@ -23,6 +23,9 @@ check:
 	go vet ./...
 	gofmt -d -s `find . -name "*.go" -type f`
 	go test ./...
+
+game-24:
+	${GO_EXECUTABLE} build ${LDFLAGS} -o game24/main/game24 game24/main/main.go
 
 clean:
 	rm -f ${BINARY}
