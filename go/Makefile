@@ -15,7 +15,7 @@ else
 	os=linux
 endif
 
-build: check game24
+build: check game-24
 	${GO_EXECUTABLE} build ${LDFLAGS} -o ${BINARY}
 
 check:

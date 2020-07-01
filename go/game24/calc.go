@@ -1,6 +1,12 @@
 package game24
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strconv"
+)
+
+const precision float64 = 0.001
 
 type Node struct {
 	Left, Right *Node
@@ -8,11 +14,45 @@ type Node struct {
 	Operator    string
 }
 
+func Calc(n1, n2, n3, n4, target float64) {
+	trees := allTrees(n1, n2, n3, n4)
+	trees = calcFilter(trees, target)
+	trees = revsFilter(trees)
+	for _, tree := range trees {
+		fmt.Println(inOrderFormatTree(tree))
+	}
+}
+
+func revsFilter(trees []*Node) []*Node {
+	dict := make(map[string]*Node)
+	for _, tree := range trees {
+		revsTree(tree)
+		dict[inOrderFormatTree(tree)] = tree
+	}
+
+	result := make([]*Node, 0, len(dict))
+	for _, tree := range dict {
+		result = append(result, tree)
+	}
+
+	return result
+}
+
+func calcFilter(trees []*Node, target float64) []*Node {
+	results := make([]*Node, 0, len(trees))
+	for _, tree := range trees {
+		val, err := calcTree(tree)
+		if err == nil && target-precision <= val && target+precision >= val {
+			results = append(results, tree)
+		}
+	}
+	return results
+}
+
 func allTrees(n1, n2, n3, n4 float64) []*Node {
 	opCombs := AllOpCombines()
 	permutations := AllPermutations([]float64{n1, n2, n3, n4})
-
-	trees := make([]*Node, len(opCombs)*len(permutations)*5)
+	trees := make([]*Node, 0, len(opCombs)*len(permutations)*5)
 	for _, ops := range opCombs {
 		for _, per := range permutations {
 			t1 := TreeType1(ops[0], ops[1], ops[2], per[0], per[1], per[2], per[3])
@@ -25,6 +65,56 @@ func allTrees(n1, n2, n3, n4 float64) []*Node {
 	}
 
 	return trees
+}
+
+func revsTree(tree *Node) {
+	if tree.Left != nil && tree.Right != nil {
+		revsTree(tree.Left)
+		revsTree(tree.Right)
+		if tree.Operator == "+" || tree.Operator == "*" {
+			if tree.Left.Value > tree.Right.Value {
+				tree.Left, tree.Right = tree.Right, tree.Left
+			}
+		}
+	}
+}
+
+func calcTree(tree *Node) (float64, error) {
+	if tree.Left != nil && tree.Right != nil {
+		leftVal, err := calcTree(tree.Left)
+		if err != nil {
+			return 0, err
+		}
+		rightVal, err := calcTree(tree.Right)
+		if err != nil {
+			return 0, err
+		}
+		switch tree.Operator {
+		case "+":
+			tree.Value = leftVal + rightVal
+		case "-":
+			tree.Value = leftVal - rightVal
+		case "*":
+			tree.Value = leftVal * rightVal
+		case "/":
+			if rightVal == 0 {
+				return 0, fmt.Errorf("divied zero")
+			} else {
+				tree.Value = leftVal / rightVal
+			}
+		default:
+			return 0, fmt.Errorf("unsupported operator %s", tree.Operator)
+		}
+	}
+	return tree.Value, nil
+}
+
+func inOrderFormatTree(tree *Node) string {
+	if tree.Left != nil && tree.Right != nil {
+		return fmt.Sprintf("(%s %s %s)", inOrderFormatTree(tree.Left), tree.Operator, inOrderFormatTree(tree.Right))
+	} else {
+		return strconv.Itoa(int(tree.Value))
+	}
 }
 
 func AllPermutations(nums []float64) [][]float64 {
