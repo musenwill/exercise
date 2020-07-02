@@ -163,26 +163,17 @@ func unflatTree(tree *Node) {
 		unflatTree(tree.Left)
 		unflatTree(tree.Right)
 		if tree.Operator.Value == "+" {
-			if tree.Left.flatted {
-				tree.Left.Value *= -1
-				tree.Left.flatted = false
-			}
 			if tree.Right.flatted {
 				tree.Right.Value *= -1
 				tree.Right.flatted = false
+				tree.Operator, _ = GetOperator("-")
 			}
-			tree.Operator, _ = GetOperator("-")
-
 		} else if tree.Operator.Value == "*" && tree.Right.flatted {
-			if tree.Left.flatted {
-				tree.Left.Value = 1.0 / tree.Left.Value
-				tree.Left.flatted = false
-			}
 			if tree.Right.flatted {
 				tree.Right.Value = 1.0 / tree.Right.Value
 				tree.Right.flatted = false
+				tree.Operator, _ = GetOperator("/")
 			}
-			tree.Operator, _ = GetOperator("/")
 		}
 	}
 }
