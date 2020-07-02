@@ -12,17 +12,19 @@ type Node struct {
 	Left, Right *Node
 	Value       float64
 	Operator    *Operator
+	flatted     bool
 }
 
 type Operator struct {
-	Level int
-	Value string
+	Level       int
+	Value       string
+	Commutative bool
 }
 
-var PlusOp *Operator = &Operator{Level: 1, Value: "+"}
-var SubOp *Operator = &Operator{Level: 1, Value: "-"}
-var MultiOp *Operator = &Operator{Level: 4, Value: "*"}
-var DivOp *Operator = &Operator{Level: 4, Value: "/"}
+var PlusOp *Operator = &Operator{Level: 1, Value: "+", Commutative: true}
+var SubOp *Operator = &Operator{Level: 1, Value: "-", Commutative: false}
+var MultiOp *Operator = &Operator{Level: 4, Value: "*", Commutative: true}
+var DivOp *Operator = &Operator{Level: 4, Value: "/", Commutative: false}
 
 func Calc(n1, n2, n3, n4, target float64) {
 	trees := allTrees(n1, n2, n3, n4)
@@ -36,7 +38,9 @@ func Calc(n1, n2, n3, n4, target float64) {
 func revsFilter(trees []*Node) []*Node {
 	dict := make(map[string]*Node)
 	for _, tree := range trees {
+		// flatTree(tree)
 		revsTree(tree)
+		// unflatTree(tree)
 		dict[inOrderFormatTree(tree)] = tree
 	}
 
@@ -82,24 +86,24 @@ func revsTree(tree *Node) {
 		revsTree(tree.Left)
 		revsTree(tree.Right)
 
-		if tree.Operator.Value == "+" || tree.Operator.Value == "*" {
+		if tree.Operator.Commutative {
 			if !tree.Right.IsLeaf() {
 				if !tree.Left.IsLeaf() {
-					if tree.Left.Operator.Level > tree.Right.Operator.Level {
+					if tree.Left.Operator.Level < tree.Right.Operator.Level {
 						tree.Left, tree.Right = tree.Right, tree.Left
 					}
 				} else {
-					if tree.Operator.Level > tree.Right.Operator.Level {
+					if tree.Operator.Level < tree.Right.Operator.Level {
 						tree.Left, tree.Right = tree.Right, tree.Left
 					}
 				}
 			} else {
 				if !tree.Left.IsLeaf() {
-					if tree.Left.Operator.Level > tree.Operator.Level {
+					if tree.Left.Operator.Level < tree.Operator.Level {
 						tree.Left, tree.Right = tree.Right, tree.Left
 					}
 				} else {
-					if tree.Left.Value > tree.Right.Value {
+					if tree.Left.Value < tree.Right.Value {
 						tree.Left, tree.Right = tree.Right, tree.Left
 					}
 				}
@@ -138,6 +142,51 @@ func calcTree(tree *Node) (float64, error) {
 	return tree.Value, nil
 }
 
+func flatTree(tree *Node) {
+	if !tree.IsLeaf() {
+		flatTree(tree.Left)
+		flatTree(tree.Right)
+		if tree.Operator.Value == "-" {
+			tree.Right.Value *= -1
+			tree.Operator, _ = GetOperator("+")
+			tree.Right.flatted = true
+		} else if tree.Operator.Value == "/" {
+			tree.Right.Value = 1.0 / tree.Right.Value
+			tree.Operator, _ = GetOperator("*")
+			tree.Right.flatted = true
+		}
+	}
+}
+
+func unflatTree(tree *Node) {
+	if !tree.IsLeaf() {
+		unflatTree(tree.Left)
+		unflatTree(tree.Right)
+		if tree.Operator.Value == "+" {
+			if tree.Left.flatted {
+				tree.Left.Value *= -1
+				tree.Left.flatted = false
+			}
+			if tree.Right.flatted {
+				tree.Right.Value *= -1
+				tree.Right.flatted = false
+			}
+			tree.Operator, _ = GetOperator("-")
+
+		} else if tree.Operator.Value == "*" && tree.Right.flatted {
+			if tree.Left.flatted {
+				tree.Left.Value = 1.0 / tree.Left.Value
+				tree.Left.flatted = false
+			}
+			if tree.Right.flatted {
+				tree.Right.Value = 1.0 / tree.Right.Value
+				tree.Right.flatted = false
+			}
+			tree.Operator, _ = GetOperator("/")
+		}
+	}
+}
+
 func inOrderFormatTree(tree *Node) string {
 	if !tree.IsLeaf() {
 		left, right := inOrderFormatTree(tree.Left), inOrderFormatTree(tree.Right)
@@ -147,14 +196,37 @@ func inOrderFormatTree(tree *Node) string {
 		if !tree.Right.IsLeaf() {
 			if tree.Right.Operator.Level < tree.Operator.Level {
 				right = fmt.Sprintf("(%s)", right)
-			} else if tree.Right.Operator.Level == tree.Operator.Level && (tree.Operator.Value == "-" || tree.Operator.Value == "/") {
-				right = fmt.Sprintf("(%s)", right)
+			} else if tree.Right.Operator.Level == tree.Operator.Level {
+				if !tree.Operator.Commutative {
+					right = fmt.Sprintf("(%s)", right)
+				}
 			}
 		}
 		return fmt.Sprintf("%s %s %s", left, tree.Operator.Value, right)
-	} else {
-		return strconv.Itoa(int(tree.Value))
 	}
+
+	return strconv.Itoa(int(tree.Value))
+}
+
+func printTree(tree *Node) string {
+	if !tree.IsLeaf() {
+		left, right := printTree(tree.Left), printTree(tree.Right)
+		if !tree.Left.IsLeaf() && tree.Left.Operator.Level < tree.Operator.Level {
+			left = fmt.Sprintf("(%s)", left)
+		}
+		if !tree.Right.IsLeaf() {
+			if tree.Right.Operator.Level < tree.Operator.Level {
+				right = fmt.Sprintf("(%s)", right)
+			} else if tree.Right.Operator.Level == tree.Operator.Level {
+				if !tree.Operator.Commutative {
+					right = fmt.Sprintf("(%s)", right)
+				}
+			}
+		}
+		return fmt.Sprintf("%s %s %s", left, tree.Operator.Value, right)
+	}
+
+	return fmt.Sprintf("%f", tree.Value)
 }
 
 func AllPermutations(nums []float64) [][]float64 {
