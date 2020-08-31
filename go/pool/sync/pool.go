@@ -20,6 +20,9 @@ func getMap() map[string]struct{} {
 }
 
 func putMap(m map[string]struct{}) {
+	for k := range m {
+		delete(m, k)
+	}
 	mapPool.Put(m)
 }
 
