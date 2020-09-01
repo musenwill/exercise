@@ -64,6 +64,7 @@ Error Set:
 */
 
 /*
+echo "GET http://localhost:8080/ping" | vegeta attack -duration=60s -rate=16000 | tee results.bin | vegeta report
 Requests      [total, rate, throughput]         960000, 15999.95, 15999.89
 Duration      [total, attack, wait]             1m0s, 1m0s, 219.718µs
 Latencies     [min, mean, 50, 90, 95, 99, max]  60.168µs, 317.836µs, 199.193µs, 531.413µs, 968.511µs, 2.231ms, 25.028ms
