@@ -74,3 +74,8 @@ Success       [ratio]                           100.00%
 Status Codes  [code:count]                      200:960000
 Error Set:
 */
+
+/*
+echo "GET http://localhost:8080/ping" | vegeta attack -duration=60s -rate=32000 | tee results.bin | vegeta report
+
+*/
