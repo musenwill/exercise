@@ -4,6 +4,32 @@ import (
 	"testing"
 )
 
+func TestLevelMapPool(t *testing.T) {
+	for i := 0; i < 10000; i++ {
+		mm := getL2Map()
+
+		pet := getMap()
+		pet["cat"] = struct{}{}
+		pet["dog"] = struct{}{}
+		mm["pet"] = pet
+
+		food := getMap()
+		food["egg"] = struct{}{}
+		food["bread"] = struct{}{}
+		mm["food"] = food
+
+		putL2Map(mm)
+
+		mm = getL2Map()
+		if _, exist := mm["pet"]; exist {
+			t.Fatal()
+		}
+		if _, exist := mm["food"]; exist {
+			t.Fatal()
+		}
+	}
+}
+
 // BenchmarkLevelMapPool-8   	 5097276	       233 ns/op	       0 B/op	       0 allocs/op
 func BenchmarkLevelMapPool(b *testing.B) {
 	b.ResetTimer()
