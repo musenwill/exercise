@@ -2,6 +2,7 @@ package priv
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -9,30 +10,36 @@ import (
 // Privilege is action type that can be granted to user.
 type Privilege int
 
-const (
-	ReadPrivilege     Privilege = 1 << 0
-	WritePrivilege    Privilege = 1 << 1
-	CreateCQPrivilege Privilege = 1 << 2
-	InsertPrivilege   Privilege = 1 << 3
-	SelectPrivilege   Privilege = 1 << 4
-	DeletePrivilege   Privilege = 1 << 5
-	DropPrivilege     Privilege = 1 << 6
-
-	ShowUsersPrivilege      Privilege = 1 << 16
-	CreateUserPrivilege     Privilege = 1 << 17
-	ShowRolesPrivilege      Privilege = 1 << 18
-	CreateRolePrivilege     Privilege = 1 << 19
-	GrantPrivilege          Privilege = 1 << 20
-	ShowDatabasesPrivilege  Privilege = 1 << 21
-	CreateDatabasePrivilege Privilege = 1 << 22
-	ShowSysInfoPrivilege    Privilege = 1 << 23
-	SetSysInfoPrivilege     Privilege = 1 << 24
-	AuditPrivilege          Privilege = 1 << 25
-	ShowQueriesPrivilege    Privilege = 1 << 26
-
+const ( // resource privileges
+	ReadPrivilege Privilege = 1 << iota
+	WritePrivilege
+	CreateCQPrivilege
+	InsertPrivilege
+	SelectPrivilege
+	DeletePrivilege
+	DropPrivilege
+)
+const ( // global privileges
+	ShowUsersPrivilege Privilege = 1 << (iota + 16)
+	CreateUserPrivilege
+	ShowRolesPrivilege
+	CreateRolePrivilege
+	GrantPrivilege
+	ShowDatabasesPrivilege
+	CreateDatabasePrivilege
+	ShowSysInfoPrivilege
+	SetSysInfoPrivilege
+	AuditPrivilege
+	ShowCQSPrivilege
+)
+const ( // grouped privileges
 	NoPrivilege           Privilege = 0
-	AllGlobalPrivileges   Privilege = 0xFFFFFFFF
 	AllResourcePrivileges Privilege = 0xFFFF
+	AllGlobalPrivileges   Privilege = 1<<31 - 1
+
+	// ReadGroupPrivileges and WriteGroupPrivileges is define for compatible with old version
+	ReadGroupPrivileges  Privilege = ShowDatabasesPrivilege | SelectPrivilege | CreateCQPrivilege
+	WriteGroupPrivileges Privilege = CreateDatabasePrivilege | DeletePrivilege | DropPrivilege
 )
 
 // String returns a string representation of a Privilege.
@@ -42,17 +49,17 @@ func (p Privilege) String() string {
 	}
 
 	privMask := Privilege(1)
-	privs := make([]string, 0, 16)
+	names := make([]string, 0, 16)
 	for privMask != 0 {
 		if privMask&p == privMask {
 			if name, ok := privilege2name[privMask]; ok {
-				privs = append(privs, name)
+				names = append(names, name)
 			}
 		}
 		privMask <<= 1
 	}
 
-	return strings.Join(privs, ", ")
+	return strings.Join(names, ", ")
 }
 
 // PrivilegeOf find privilege of given name.
@@ -83,84 +90,131 @@ var privilege2name = map[Privilege]string{
 	ShowSysInfoPrivilege:    "SHOW SYSINFO",
 	SetSysInfoPrivilege:     "SET SYSINFO",
 	AuditPrivilege:          "AUDIT",
-	ShowQueriesPrivilege:    "SHOW QUERIES",
+	ShowCQSPrivilege:        "SHOW CQS",
 
 	AllGlobalPrivileges:   "ALL PRIVILEGES",
 	AllResourcePrivileges: "ALL PRIVILEGES",
 }
 
-var name2privilege = map[string]Privilege{
-	"READ":      ReadPrivilege,
-	"WRITE":     WritePrivilege,
-	"CREATE CQ": CreateCQPrivilege,
-	"INSERT":    InsertPrivilege,
-	"SELECT":    SelectPrivilege,
-	"DELETE":    DeletePrivilege,
-	"DROP":      DropPrivilege,
+var name2privilege = make(map[string]Privilege)
 
-	"SHOW USERS":      ShowUsersPrivilege,
-	"CREATE USER":     CreateUserPrivilege,
-	"SHOW ROLES":      ShowRolesPrivilege,
-	"CREATE ROLE":     CreateRolePrivilege,
-	"GRANT":           GrantPrivilege,
-	"SHOW DATABASES":  ShowDatabasesPrivilege,
-	"CREATE DATABASE": CreateDatabasePrivilege,
-	"SHOW SYSINFO":    ShowSysInfoPrivilege,
-	"SET SYSINFO":     SetSysInfoPrivilege,
-	"AUDIT":           AuditPrivilege,
-	"SHOW QUERIES":    ShowQueriesPrivilege,
-
-	"ALL":            AllGlobalPrivileges,
-	"ALL PRIVILEGES": AllGlobalPrivileges,
+func init() {
+	for k, v := range privilege2name {
+		name2privilege[v] = k
+	}
+	name2privilege["ALL"] = AllGlobalPrivileges
+	name2privilege["ALL PRIVILEGES"] = AllGlobalPrivileges
 }
 
 // ResourcePath represent dot seperated path, eg `"my.db".autogen.cpu`
-type ResourcePath string
+type ResourcePath struct {
+	Segs []string
+}
 
-func (r ResourcePath) Idents() ([]string, error) {
-	qr := strings.NewReader(string(r))
+var GlobalResource = NewResourcePath()
+
+func CreateResourcePathUnsafe(resource string) *ResourcePath {
+	r, _ := CreateResourcePath(resource)
+	return r
+}
+
+func CreateResourcePath(resource string) (*ResourcePath, error) {
+	if strings.TrimSpace(resource) == "" {
+		return NewResourcePath(), nil
+	}
+
+	qr := strings.NewReader(string(resource))
 	p := NewParser(qr)
-	idents, err := p.parseSegmentedIdents()
+	segs, err := p.parseSegmentedIdents()
 	if err != nil {
 		return nil, err
 	}
-	for _, ident := range idents {
-		if strings.TrimSpace(ident) == "" {
-			return nil, fmt.Errorf("invalid resource path %s, expect a full path", r)
-		}
+	return NewResourcePath(segs...), nil
+}
+
+func NewResourcePath(segs ...string) *ResourcePath {
+	if len(segs) > 0 && segs[0] == "" { // first part shall not be empty
+		return &ResourcePath{}
 	}
-	return idents, nil
+	if len(segs) > 2 && segs[1] == "" {
+		segs[1] = "autogen" // autogen may have omited
+	}
+
+	return &ResourcePath{segs}
+}
+
+func (r *ResourcePath) String() string {
+	var buf bytes.Buffer
+
+	for i, seg := range r.Segs {
+		if i != 0 {
+			buf.WriteString(".")
+		}
+		buf.WriteString(QuoteIdent(seg))
+	}
+
+	return buf.String()
+}
+
+// PrivilegeSet manipulates privilges on resources.
+type PrivilegeSet interface {
+	// SetAll set full privileges to privilege set.
+	SetAll()
+	// ClearAll clear all privileges from privilege set.
+	ClearAll()
+	// AddGlobal add some privileges to global resource.
+	AddGlobal(privilege Privilege)
+	// DeleteGlobal delete some privileges from all resources.
+	DeleteGlobal(privilege Privilege)
+	// Add some privileges to given resource.
+	Add(resource *ResourcePath, privilege Privilege)
+	// Delete some privielges from all resources under the given resource name.
+	Delete(resource *ResourcePath, privilege Privilege)
+	// UnionWith combine all privileges of 2 privilege sets.
+	UnionWith(s PrivilegeSet)
+	// DifferentWith delete all privileges from the given privilege set.
+	DifferentWith(s PrivilegeSet)
+	// GlobalContain checks if root node have the given privileges.
+	// It should be noticed that this does not mean have privileges on every resources.
+	GlobalContain(privilege Privilege) bool
+	// Contain checks if privileges set contains privileges on the given resource.
+	Contain(resource *ResourcePath, privilege Privilege) bool
+	// Contains checks if the privilege set contains all privileges from another set.
+	Contains(s PrivilegeSet) bool
+	// Powerless check set if don't has any privilege.
+	Powerless() bool
 }
 
 // NewPrivilegeTree create an empty privilege tree
 func NewPrivilegeTree() *PrivilegeTree {
-	return &PrivilegeTree{}
+	return &PrivilegeTree{Tree: make(map[string]*PrivilegeTree)}
 }
 
-// PrivilegeTree is a collection of privileges on some resources.
+// PrivilegeTree is an implementation of PrivilegeSet interface.
 type PrivilegeTree struct {
 	Privilege Privilege
 	Tree      map[string]*PrivilegeTree
 }
 
+func (t *PrivilegeTree) implPrivilegeSet() {
+	var _ PrivilegeSet = (*PrivilegeTree)(nil)
+}
+
 // SetAll set full privileges to privilege tree.
 func (t *PrivilegeTree) SetAll() {
 	t.Privilege = AllGlobalPrivileges
-	t.Tree = nil
+	t.Tree = make(map[string]*PrivilegeTree)
 }
 
 // ClearAll clear all privileges from privilege tree.
 func (t *PrivilegeTree) ClearAll() {
 	t.Privilege = NoPrivilege
-	t.Tree = nil
+	t.Tree = make(map[string]*PrivilegeTree)
 }
 
 // AddGlobal add some privileges to global resource.
 func (t *PrivilegeTree) AddGlobal(privilege Privilege) {
 	t.Privilege |= privilege
-	if t.Tree == nil {
-		return
-	}
 	for _, v := range t.Tree {
 		if v != nil {
 			v.DeleteGlobal(privilege)
@@ -171,9 +225,6 @@ func (t *PrivilegeTree) AddGlobal(privilege Privilege) {
 // DeleteGlobal delete some privileges from all resources.
 func (t *PrivilegeTree) DeleteGlobal(privilege Privilege) {
 	t.Privilege &^= privilege
-	if t.Tree == nil {
-		return
-	}
 	for _, v := range t.Tree {
 		if v != nil {
 			v.DeleteGlobal(privilege)
@@ -182,24 +233,17 @@ func (t *PrivilegeTree) DeleteGlobal(privilege Privilege) {
 	t.prune()
 }
 
-// Add add some privileges to given resource
-func (t *PrivilegeTree) Add(resource string, privilege Privilege) error {
+// Add some privileges to given resource
+func (t *PrivilegeTree) Add(resource *ResourcePath, privilege Privilege) {
 	privilege &= AllResourcePrivileges
 
 	sum := NoPrivilege
-	idents, err := ResourcePath(resource).Idents()
-	if err != nil {
-		return err
-	}
-	for _, ident := range idents {
+	for _, seg := range resource.Segs {
 		sum ^= t.Privilege
-		if t.Tree == nil {
-			t.Tree = make(map[string]*PrivilegeTree)
+		if t.Tree[seg] == nil {
+			t.Tree[seg] = NewPrivilegeTree()
 		}
-		if t.Tree[ident] == nil {
-			t.Tree[ident] = NewPrivilegeTree()
-		}
-		t = t.Tree[ident]
+		t = t.Tree[seg]
 	}
 	result := ^sum            // make sure (result ^ sum) & privilege = privilege
 	result &= privilege       // clear all bits unrelated with incoming privilege
@@ -211,28 +255,20 @@ func (t *PrivilegeTree) Add(resource string, privilege Privilege) error {
 			v.DeleteGlobal(privilege)
 		}
 	}
-
-	return nil
+	t.prune()
 }
 
-// Delete delete some privielges from all resources under the given resource name.
-func (t *PrivilegeTree) Delete(resource string, privilege Privilege) error {
+// Delete some privielges from all resources under the given resource name.
+func (t *PrivilegeTree) Delete(resource *ResourcePath, privilege Privilege) {
 	privilege &= AllResourcePrivileges
 
 	sum := NoPrivilege
-	idents, err := ResourcePath(resource).Idents()
-	if err != nil {
-		return err
-	}
-	for _, ident := range idents {
+	for _, seg := range resource.Segs {
 		sum ^= t.Privilege
-		if t.Tree == nil {
-			t.Tree = make(map[string]*PrivilegeTree)
+		if t.Tree[seg] == nil {
+			t.Tree[seg] = NewPrivilegeTree()
 		}
-		if t.Tree[ident] == nil {
-			t.Tree[ident] = NewPrivilegeTree()
-		}
-		t = t.Tree[ident]
+		t = t.Tree[seg]
 	}
 	sum &= privilege          // clear all bits unrelated with incoming privilege
 	t.Privilege &^= privilege // reset related bits to zero
@@ -245,13 +281,11 @@ func (t *PrivilegeTree) Delete(resource string, privilege Privilege) error {
 	}
 
 	t.prune()
-
-	return nil
 }
 
 // UnionWith combine all privileges of 2 privilege trees.
-func (t *PrivilegeTree) UnionWith(s *PrivilegeTree) {
-	t.union(NoPrivilege, NoPrivilege, NoPrivilege, s, true)
+func (t *PrivilegeTree) UnionWith(s PrivilegeSet) {
+	t.union(NoPrivilege, NoPrivilege, NoPrivilege, s.(*PrivilegeTree), true)
 	t.prune()
 }
 
@@ -269,13 +303,7 @@ func (t *PrivilegeTree) union(tsum, ssum, newsum Privilege, s *PrivilegeTree, ro
 	newsum ^= current
 	t.Privilege = current
 
-	if s.Tree == nil {
-		return
-	}
 	for k, v := range s.Tree {
-		if t.Tree == nil {
-			t.Tree = make(map[string]*PrivilegeTree)
-		}
 		if tt := t.Tree[k]; tt == nil && v != nil {
 			t.Tree[k] = NewPrivilegeTree()
 		}
@@ -289,8 +317,8 @@ func (t *PrivilegeTree) union(tsum, ssum, newsum Privilege, s *PrivilegeTree, ro
 }
 
 // DifferentWith delete all privileges from the given privilege tree.
-func (t *PrivilegeTree) DifferentWith(s *PrivilegeTree) {
-	t.sub(NoPrivilege, NoPrivilege, NoPrivilege, s, true)
+func (t *PrivilegeTree) DifferentWith(s PrivilegeSet) {
+	t.sub(NoPrivilege, NoPrivilege, NoPrivilege, s.(*PrivilegeTree), true)
 	t.prune()
 }
 
@@ -308,13 +336,7 @@ func (t *PrivilegeTree) sub(tsum, ssum, newsum Privilege, s *PrivilegeTree, root
 	newsum ^= current
 	t.Privilege = current
 
-	if s.Tree == nil {
-		return
-	}
 	for k, v := range s.Tree {
-		if t.Tree == nil {
-			t.Tree = make(map[string]*PrivilegeTree)
-		}
 		tt := t.Tree[k]
 		if tt == nil && v != nil {
 			t.Tree[k] = NewPrivilegeTree()
@@ -332,90 +354,34 @@ func (t *PrivilegeTree) sub(tsum, ssum, newsum Privilege, s *PrivilegeTree, root
 // GlobalContain checks if root node have the given privileges.
 // It should be noticed that this does not mean have privileges on every resources.
 func (t *PrivilegeTree) GlobalContain(privilege Privilege) bool {
-	privilege &^= t.Privilege
-	return privilege == NoPrivilege
+	return privilege&^t.compatibleWithReadWrite(t.Privilege) == NoPrivilege
 }
 
 // Contain checks if privileges set contains privileges on the given resource.
-func (t *PrivilegeTree) Contain(resource string, privilege Privilege) (bool, error) {
-	idents, err := ResourcePath(resource).Idents()
-	if err != nil {
-		return false, err
-	}
-
+func (t *PrivilegeTree) Contain(resource *ResourcePath, privilege Privilege) bool {
 	sum := NoPrivilege
 	sum ^= t.Privilege
-	for _, ident := range idents {
-		if t.Tree == nil {
+	for _, seg := range resource.Segs {
+		if t.Tree[seg] == nil {
 			break
 		}
-		if t.Tree[ident] == nil {
-			break
-		}
-		t = t.Tree[ident]
+		t = t.Tree[seg]
 		sum ^= t.Privilege
 	}
-	sum &= privilege
 
-	return sum == privilege, nil
+	return t.compatibleWithReadWrite(sum)&privilege == privilege
 }
 
 // Contains checks if the privilege set contains all privileges from another set.
-func (t *PrivilegeTree) Contains(s *PrivilegeTree) bool {
-	s.sub(NoPrivilege, NoPrivilege, NoPrivilege, t, true)
-	return s.powerless()
-}
-
-func (t *PrivilegeTree) containSub(tsum, ssum, newsum Privilege, s *PrivilegeTree, root bool) bool {
-	if t == nil || s == nil {
-		return true
-	}
-
-	tsum ^= t.Privilege
-	ssum ^= s.Privilege
-	current := tsum ^ ssum ^ newsum
-	if !root {
-		current &= AllResourcePrivileges
-	}
-	newsum ^= current
-	t.Privilege = current
-
-	if t.Privilege != NoPrivilege {
-		return false
-	}
-
-	if s.Tree == nil {
-		return true
-	}
-	for k, v := range s.Tree {
-		if t.Tree == nil {
-			t.Tree = make(map[string]*PrivilegeTree)
-		}
-		tt := t.Tree[k]
-		if tt == nil && v != nil {
-			t.Tree[k] = NewPrivilegeTree()
-		}
-
-		ret := t.Tree[k].containSub(tsum, ssum, newsum, v, false)
-		if !ret {
-			return ret
-		}
-	}
-
-	return true
+func (t *PrivilegeTree) Contains(s PrivilegeSet) bool {
+	s.(*PrivilegeTree).sub(NoPrivilege, NoPrivilege, NoPrivilege, t, true)
+	return s.Powerless()
 }
 
 // tidy free useless memory.
 func (t *PrivilegeTree) prune() {
-	if t.powerless() {
+	if t.Powerless() {
 		t.ClearAll()
-		return
-	}
-	if t.Tree == nil {
-		return
-	}
-	if len(t.Tree) == 0 {
-		t.Tree = nil
 		return
 	}
 	for _, v := range t.Tree {
@@ -425,18 +391,27 @@ func (t *PrivilegeTree) prune() {
 	}
 }
 
+// read privilege or write privilege in old version equals a group of privileges
+// in current version, so should handle read and write privilege especially
+func (t *PrivilegeTree) compatibleWithReadWrite(privilege Privilege) Privilege {
+	if privilege&ReadPrivilege == ReadPrivilege {
+		privilege |= ReadGroupPrivileges
+	}
+	if privilege&WritePrivilege == WritePrivilege {
+		privilege |= WriteGroupPrivileges
+	}
+	return privilege
+}
+
 // if PrivilegeTree don't has any privilege
-func (t *PrivilegeTree) powerless() bool {
+func (t *PrivilegeTree) Powerless() bool {
 	if t.Privilege != NoPrivilege {
 		return false
-	}
-	if t.Tree == nil {
-		return true
 	}
 
 	for _, v := range t.Tree {
 		if v != nil {
-			if !v.powerless() {
+			if !v.Powerless() {
 				return false
 			}
 		}
@@ -445,18 +420,104 @@ func (t *PrivilegeTree) powerless() bool {
 	return true
 }
 
-// String serialize PrivilegeTree to string, just for debug.
+/*
+String serialize PrivilegeTree to string, use BFS strategy.
+One node can be serialized as (name, privilege), an empty node can be
+serialized as ().
+All children of a node can be bracketed in [], and all nodes of one floor can
+be bracketed in {}
+
+Example, a tree as follow:
+
+        ┌- (yourdb, 3)
+        |
+(, 1) --|              ┌- (daily, 5)
+		|              |
+		└- (mydb, 2) --|                 ┌- (mem, 7)
+					   |                 |
+					   └- (autogen, 4) --|
+										 |
+										 └- (cpu, 6)
+will be serialized as:
+{[(, 1)]} {[(yourdb, 3)(mydb, 2)]} {[][(daily, 5)(autogen, 4)]} {[][(mem, 7)(cpu, 6)]}
+*/
+
 func (t *PrivilegeTree) String() string {
 	buf := &bytes.Buffer{}
-	t.string(buf, "")
+
+	floor := []map[string]*PrivilegeTree{{"": t}}
+	for len(floor) > 0 {
+		newFloor := make([]map[string]*PrivilegeTree, 0)
+
+		buf.WriteString("{")
+		for _, f := range floor {
+			buf.WriteString("[")
+			for k, v := range f {
+				if v != nil {
+					buf.WriteString(fmt.Sprintf("(%s,%d)", QuoteIdent(k), v.Privilege))
+					newFloor = append(newFloor, v.Tree)
+				} else {
+					buf.WriteString("()")
+				}
+			}
+			buf.WriteString("]")
+		}
+		buf.WriteString("}")
+
+		floor = newFloor
+	}
+
 	return buf.String()
 }
 
-func (t *PrivilegeTree) string(buf *bytes.Buffer, indent string) {
-	buf.WriteString(fmt.Sprintf("%s%s\n", indent, t.Privilege))
-	indent += "    "
-	for k, v := range t.Tree {
-		buf.WriteString(fmt.Sprintf("%s%s\n", indent, k))
-		v.string(buf, indent)
+// LoadPrivilegeTree unserialize PrivilegeTree from string.
+// Uncomplete version, can not handle situation which character '{}[]()' contained
+// in node name.
+func LoadPrivilegeTree(s string) (*PrivilegeTree, error) {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+
+	floors, err := parseSections(runes, '{', '}')
+	if err != nil {
+		return nil, err
 	}
+
+	for _, floor := range floors {
+		children, err := parseSections(floor, '[', ']')
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range children {
+			fmt.Println(string(f))
+		}
+	}
+
+	return nil, nil
+}
+
+func parseSections(s []rune, start, end rune) ([][]rune, error) {
+	var sections [][]rune
+
+	len := len(s)
+	var left int
+	for left < len-1 {
+		if s[left] != start {
+			left++
+			continue
+		}
+		var right int
+		for right = left + 1; right < len; right++ {
+			if s[right] == end {
+				break
+			}
+		}
+		if right >= len {
+			return nil, errors.New("")
+		}
+
+		sections = append(sections, s[left+1:right])
+		left = right + 1
+	}
+
+	return sections, nil
 }
