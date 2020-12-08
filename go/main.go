@@ -1,10 +1,19 @@
 package main
 
+import "fmt"
+
 func main() {
-	foo := make(map[string]struct{})
-	bar := make(map[string]interface{})
+	var f *foo = nil
+	f.bar()
+	fmt.Println(f)
+}
 
-	foo["foo"] = struct{}{}
-	bar["bar"] = struct{}{}
+type foo struct{}
 
+func (f *foo) bar() {
+	if f == nil {
+		fmt.Println("nil.bar()")
+	} else {
+		fmt.Println("foo.bar()")
+	}
 }
