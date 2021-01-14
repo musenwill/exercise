@@ -28,17 +28,17 @@ func WriteFile(data []byte) error {
 		return err
 	}
 	defer file.Close()
-	if _, _err_ := failpoint.Eval(_curpkg_("open-file-failed")); _err_ == nil {
-		return fmt.Errorf("open file failed")
-	}
+	failpoint.Inject("open-file-failed", func(v failpoint.Value) error {
+		return fmt.Errorf("open file failed: %v", v.(string))
+	})
 
 	_, err = file.Write(data)
 	if err != nil {
 		return err
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("write-file-failed")); _err_ == nil {
-		return fmt.Errorf("write file failed")
-	}
+	failpoint.Inject("write-file-failed", func(v failpoint.Value) error {
+		return fmt.Errorf("write file failed: %v", v.(string))
+	})
 
 	return nil
 }
