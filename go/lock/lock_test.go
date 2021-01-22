@@ -1,8 +1,10 @@
 package lock
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 // BenchmarkNoLock-8   	1000000000	         0.549 ns/op	       0 B/op	       0 allocs/op
@@ -42,4 +44,34 @@ func BenchmarkLock(b *testing.B) {
 			defer lock.Unlock()
 		}()
 	}
+}
+
+func TestReRLock(t *testing.T) {
+	var lock sync.RWMutex
+
+	lock.RLock()
+	go func() {
+		lock.Lock()
+		lock.Unlock()
+	}()
+	time.Sleep(time.Second)
+	lock.RLock()
+	lock.RUnlock()
+	lock.RUnlock()
+}
+
+func TestWorker(t *testing.T) {
+	resC := make(chan int)
+	var n int
+	for i := 0; i < 10; i++ {
+		n++
+		go func(i int) {
+			resC <- i
+		}(i)
+	}
+
+	for i := 0; i < n; i++ {
+		fmt.Println(<-resC)
+	}
+	close(resC)
 }
