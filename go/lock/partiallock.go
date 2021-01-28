@@ -8,57 +8,56 @@ import (
 )
 
 type PartialLock struct {
-	pre        sync.Mutex
-	post       sync.Mutex
-	prelocked  atomic.Bool
-	postlocked atomic.Bool
+	mu     sync.Mutex
+	locked atomic.Bool
+	postmu *PartialLock
+	bind   atomic.Bool
 }
 
 func NewPartialLock() *PartialLock {
 	return &PartialLock{}
 }
 
-func (p *PartialLock) Prelock() error {
-	if p.prelocked.Load() {
+func (p *PartialLock) WithPostLock(post *PartialLock) error {
+	if err := post.Bind(); err != nil {
+		return err
+	}
+	p.postmu = post
+	return nil
+}
+
+func (p *PartialLock) Locked() bool {
+	return p.locked.Load()
+}
+
+func (p *PartialLock) Bind() error {
+	if p.bind.Load() {
+		return errors.New("post has been bind")
+	}
+	p.bind.Store(true)
+	return nil
+}
+
+func (p *PartialLock) Lock() error {
+	if p.locked.Load() {
 		return errors.New("detect relock")
 	}
-	if p.postlocked.Load() {
+	if p.postmu != nil && p.postmu.Locked() {
 		return errors.New("detect reverse lock")
 	}
 
-	p.pre.Lock()
-	p.prelocked.Store(true)
+	p.mu.Lock()
+	p.locked.Store(true)
 
 	return nil
 }
 
-func (p *PartialLock) Preunlock() error {
-	if !p.prelocked.Load() {
+func (p *PartialLock) Unlock() error {
+	if !p.locked.Load() {
 		return errors.New("unlock not locked lock")
 	}
 
-	p.prelocked.Store(false)
-	p.pre.Unlock()
-	return nil
-}
-
-func (p *PartialLock) Postlock() error {
-	if p.postlocked.Load() {
-		return errors.New("detect relock")
-	}
-
-	p.post.Lock()
-	p.postlocked.Store(true)
-
-	return nil
-}
-
-func (p *PartialLock) Postunlock() error {
-	if !p.postlocked.Load() {
-		return errors.New("unlock not locked lock")
-	}
-
-	p.postlocked.Store(false)
-	p.post.Unlock()
+	p.locked.Store(false)
+	p.mu.Unlock()
 	return nil
 }
