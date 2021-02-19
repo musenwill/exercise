@@ -75,3 +75,13 @@ func TestWorker(t *testing.T) {
 	}
 	close(resC)
 }
+
+func TestClosedChan(t *testing.T) {
+	closing := make(chan struct{})
+	close(closing)
+	select {
+	case <-closing:
+		t.Fatal()
+	default:
+	}
+}
