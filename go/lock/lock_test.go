@@ -85,3 +85,22 @@ func TestClosedChan(t *testing.T) {
 	default:
 	}
 }
+
+// dead lock
+func TestBufChan(t *testing.T) {
+	a := make(chan bool, 1)
+	c := make(chan bool, 1)
+	for i := 0; i < 1000; i++ {
+		select {
+		case a <- true:
+			{
+				<-a
+				c <- true
+			}
+		case <-c:
+			{
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
+}

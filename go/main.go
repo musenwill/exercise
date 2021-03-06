@@ -1,10 +1,20 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func main() {
-	buf := make([]byte, 10)
-	fmt.Println(cap(buf))
-	buf = buf[:5]
-	fmt.Println(cap(buf))
+	var timerCh <-chan time.Time
+	timerChrw := make(chan time.Time)
+	close(timerChrw)
+	timerCh = timerChrw
+
+	for {
+		select {
+		case <-timerCh:
+			fmt.Println("======")
+		}
+	}
 }
